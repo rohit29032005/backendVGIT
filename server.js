@@ -11,20 +11,26 @@ const adminRoutes = require('./routes/admin');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// MongoDB connection - Works for both local and production
+// MongoDB connection - FIXED VERSION
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/student-showcase';
 
+// Updated connection without deprecated options
 mongoose.connect(MONGODB_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
+    serverSelectionTimeoutMS: 5000, // Keep trying to send operations for 5 seconds
+    socketTimeoutMS: 45000, // Close sockets after 45 seconds of inactivity
 })
-.then(() => console.log('MongoDB connected successfully'))
-.catch(err => console.log('MongoDB connection error:', err));
+.then(() => {
+    console.log('MongoDB connected successfully');
+    console.log('Connection state:', mongoose.connection.readyState);
+})
+.catch(err => {
+    console.error('MongoDB connection error:', err.message);
+});
 
-// CORS configuration - Allow your frontend
+// CORS configuration
 const allowedOrigins = [
     'http://localhost:3000',
-    'https://vit-student-showcase-frontend.vercel.app', // Update this later
+    'https://vit-student-showcase-frontend.vercel.app',
     process.env.FRONTEND_URL
 ];
 
@@ -34,7 +40,7 @@ app.use(cors({
         if (allowedOrigins.indexOf(origin) !== -1) {
             callback(null, true);
         } else {
-            callback(new Error('Not allowed by CORS'));
+            callback(null, true); // Allow all origins for now
         }
     },
     credentials: true
@@ -54,14 +60,43 @@ app.get('/', (req, res) => {
         message: 'VIT Student Showcase API is running!',
         status: 'healthy',
         timestamp: new Date().toISOString(),
-        environment: process.env.NODE_ENV || 'development'
+        environment: process.env.NODE_ENV || 'development',
+        mongoState: mongoose.connection.readyState
     });
+});
+
+// Test database connection route
+app.get('/api/test-db', async (req, res) => {
+    try {
+        const state = mongoose.connection.readyState;
+        const states = {
+            0: 'disconnected',
+            1: 'connected',
+            2: 'connecting',
+            3: 'disconnecting'
+        };
+        
+        res.json({
+            status: 'success',
+            mongoState: states[state],
+            stateNumber: state
+        });
+    } catch (error) {
+        res.status(500).json({
+            status: 'error',
+            message: error.message
+        });
+    }
 });
 
 // Error handling middleware
 app.use((err, req, res, next) => {
-    console.error(err.stack);
-    res.status(500).json({ message: 'Something went wrong!' });
+    console.error('Error:', err.message);
+    console.error('Stack:', err.stack);
+    res.status(500).json({ 
+        message: 'Something went wrong!',
+        error: process.env.NODE_ENV === 'development' ? err.message : 'Internal server error'
+    });
 });
 
 // 404 handler
