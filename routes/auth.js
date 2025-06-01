@@ -5,7 +5,7 @@ const User = require('../models/User');
 
 const router = express.Router();
 
-// Register route
+// Register route with detailed error handling
 router.post('/register', async (req, res) => {
     try {
         console.log('🔄 Registration attempt:', req.body);
@@ -14,14 +14,31 @@ router.post('/register', async (req, res) => {
         
         // Validate required fields
         if (!name || !email || !password) {
+            console.log('❌ Missing required fields');
             return res.status(400).json({ 
                 message: 'Name, email, and password are required' 
             });
         }
         
+        // Validate email format
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(email)) {
+            return res.status(400).json({ 
+                message: 'Please enter a valid email address' 
+            });
+        }
+        
+        // Validate password length
+        if (password.length < 6) {
+            return res.status(400).json({ 
+                message: 'Password must be at least 6 characters long' 
+            });
+        }
+        
         // Check if user already exists
-        const existingUser = await User.findOne({ email });
+        const existingUser = await User.findOne({ email: email.toLowerCase() });
         if (existingUser) {
+            console.log('❌ User already exists:', email);
             return res.status(400).json({ 
                 message: 'User already exists with this email' 
             });
@@ -31,19 +48,24 @@ router.post('/register', async (req, res) => {
         const saltRounds = 12;
         const hashedPassword = await bcrypt.hash(password, saltRounds);
         
-        // Create new user
-        const newUser = new User({
-            name,
-            email,
+        // Create user data object
+        const userData = {
+            name: name.trim(),
+            email: email.toLowerCase().trim(),
             password: hashedPassword,
             university: university || 'VIT Vellore',
             branch: branch || 'Computer Science',
-            year: year || 2,
+            year: parseInt(year) || 2,
             role: 'user'
-        });
+        };
         
-        // Save user to database
+        console.log('📝 Creating user with data:', { ...userData, password: '[HIDDEN]' });
+        
+        // Create and save new user
+        const newUser = new User(userData);
         await newUser.save();
+        
+        console.log('✅ User saved successfully:', newUser.email);
         
         // Generate JWT token
         const token = jwt.sign(
@@ -69,14 +91,25 @@ router.post('/register', async (req, res) => {
         });
         
     } catch (error) {
-        console.error('❌ Registration error:', error);
+        console.error('❌ Registration error details:', error);
         
+        // Handle MongoDB duplicate key error
         if (error.code === 11000) {
             return res.status(400).json({ 
                 message: 'User already exists with this email' 
             });
         }
         
+        // Handle MongoDB validation errors
+        if (error.name === 'ValidationError') {
+            const validationErrors = Object.values(error.errors).map(err => err.message);
+            return res.status(400).json({ 
+                message: 'Validation error',
+                errors: validationErrors
+            });
+        }
+        
+        // Handle other errors
         res.status(500).json({ 
             message: 'Server error during registration',
             error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
@@ -87,11 +120,10 @@ router.post('/register', async (req, res) => {
 // Login route
 router.post('/login', async (req, res) => {
     try {
-        console.log('🔄 Login attempt:', req.body.email);
+        console.log('🔄 Login attempt for:', req.body.email);
         
         const { email, password } = req.body;
         
-        // Validate input
         if (!email || !password) {
             return res.status(400).json({ 
                 message: 'Email and password are required' 
@@ -99,7 +131,7 @@ router.post('/login', async (req, res) => {
         }
         
         // Find user
-        const user = await User.findOne({ email });
+        const user = await User.findOne({ email: email.toLowerCase() });
         if (!user) {
             return res.status(401).json({ 
                 message: 'Invalid credentials' 
@@ -140,33 +172,8 @@ router.post('/login', async (req, res) => {
     } catch (error) {
         console.error('❌ Login error:', error);
         res.status(500).json({ 
-            message: 'Server error during login',
-            error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+            message: 'Server error during login'
         });
-    }
-});
-
-// Get user profile route
-router.get('/profile', async (req, res) => {
-    try {
-        const token = req.header('Authorization')?.replace('Bearer ', '');
-        
-        if (!token) {
-            return res.status(401).json({ message: 'No token provided' });
-        }
-        
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        const user = await User.findById(decoded.userId).select('-password');
-        
-        if (!user) {
-            return res.status(404).json({ message: 'User not found' });
-        }
-        
-        res.json({ user });
-        
-    } catch (error) {
-        console.error('❌ Profile error:', error);
-        res.status(401).json({ message: 'Invalid token' });
     }
 });
 
