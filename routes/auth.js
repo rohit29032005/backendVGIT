@@ -5,7 +5,25 @@ const User = require('../models/User');
 
 const router = express.Router();
 
-// Register route with detailed error handling
+// Middleware to verify JWT token
+const verifyToken = (req, res, next) => {
+    const token = req.header('Authorization')?.replace('Bearer ', '');
+    
+    if (!token) {
+        return res.status(401).json({ message: 'No token provided' });
+    }
+    
+    try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        req.userId = decoded.userId;
+        next();
+    } catch (error) {
+        console.error('Token verification failed:', error);
+        return res.status(401).json({ message: 'Invalid token' });
+    }
+};
+
+// Register route
 router.post('/register', async (req, res) => {
     try {
         console.log('🔄 Registration attempt:', req.body);
@@ -174,6 +192,37 @@ router.post('/login', async (req, res) => {
         res.status(500).json({ 
             message: 'Server error during login'
         });
+    }
+});
+
+// Get user profile route - THIS WAS MISSING!
+router.get('/profile', verifyToken, async (req, res) => {
+    try {
+        console.log('🔄 Getting profile for user:', req.userId);
+        
+        const user = await User.findById(req.userId).select('-password');
+        
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+        
+        console.log('✅ Profile found:', user.email, 'Role:', user.role);
+        
+        res.json({
+            user: {
+                id: user._id,
+                name: user.name,
+                email: user.email,
+                university: user.university,
+                branch: user.branch,
+                year: user.year,
+                role: user.role
+            }
+        });
+        
+    } catch (error) {
+        console.error('❌ Profile error:', error);
+        res.status(500).json({ message: 'Server error getting profile' });
     }
 });
 
